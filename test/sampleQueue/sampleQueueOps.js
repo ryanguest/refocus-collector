@@ -10,8 +10,10 @@
  * test/sampleQueue/sampleQueueOps.js
  */
 const expect = require('chai').expect;
+
 // const sampleUpsertUtils = require('../../src/sampleQueue/sampleUpsertUtils');
 const configModule = require('../../src/config/config');
+const sampleUpsertUtils = require('../../src/sampleQueue/sampleUpsertUtils');
 const sinon = require('sinon');
 const tu = require('../testUtils');
 const registry = tu.config.registry;
@@ -26,7 +28,7 @@ const mockRest = require('../mockedResponse');
 const httpStatus = require('../../src/constants').httpStatus;
 
 describe('test/sampleQueue/sampleQueueOps.js >', () => {
-  const samples = [];
+  let samples = [];
   for (let i = 0; i < 10; i++) { // create 10 samples
     samples.push({ name: `sample${i.toString()}`, value: i });
   }
@@ -42,6 +44,7 @@ describe('test/sampleQueue/sampleQueueOps.js >', () => {
     winstonInfoStub.restore();
     winstonErrStub.restore();
   });
+
   describe('enqueue >', () => {
     it('enqueue, ok', (done) => {
       sampleQueueOps.enqueue(samples);
@@ -66,20 +69,70 @@ describe('test/sampleQueue/sampleQueueOps.js >', () => {
     });
   });
 
-  describe('test/sampleQueue/sampleQueueOps.js >', () => {
-    it('flush, no maxSamplesPerBulkRequest set, ok', (done) => {
+  describe('flush >', () => {
+    it('flush, number of samples < maxSamplesPerBulkRequest, ok', (done) => {
+      const doBulkUpsert = sinon.spy(sampleUpsertUtils, 'doBulkUpsert');
+      sampleQueueOps.flush();
+      sinon.assert.calledOnce(doBulkUpsert);
+      doBulkUpsert.restore();
+      done();
+    });
+
+    it('flush, number of samples > maxSamplesPerBulkRequest, ok', (done) => {
+      for (let i = 0; i < 250; i++) { // create and enqueue 250 more samples
+        samples.push({ name: `sample${i.toString()}`, value: i });
+      }
+
+      sampleQueueOps.enqueue(samples);
+      const doBulkUpsert = sinon.spy(sampleUpsertUtils, 'doBulkUpsert');
+      sampleQueueOps.flush();
+
+      // maxSamplesPerBulkRequest = 100, hence doBulkUpsert called thrice
+      sinon.assert.calledThrice(doBulkUpsert);
+      doBulkUpsert.restore();
+      done();
+    });
+  });
+
+  describe(' bulkUpsertAndLog >', () => {
+    it('bulkUpsertAndLog, ok', (done) => {
+      samples = [];
+      for (let i = 0; i < 10; i++) { // create 10 samples
+        samples.push({ name: `sample${i.toString()}`, value: i });
+      }
+
       nock(refocusUrl)
         .post(bulkEndPoint, samples)
         .reply(httpStatus.CREATED, mockRest.bulkUpsertPostOk);
-      sampleQueueOps.flush();
 
+      sampleQueueOps.bulkUpsertAndLog(samples);
       setTimeout(() => {
         expect(winston.info.calledOnce).to.be.true;
         expect(winston.info.args[0][0]).contains(
           'sampleQueue flush successful for : 10 samples'
         );
         done();
-      }, 500);
+      }, 1000);
+    });
+
+    it('bulkUpsertAndLog, error', (done) => {
+      samples = [];
+      for (let i = 0; i < 10; i++) { // create 10 samples
+        samples.push({ name: `sample${i.toString()}`, value: i });
+      }
+
+      const x = nock(refocusUrl)
+        .post(bulkEndPoint, samples)
+        .reply(httpStatus.BAD_REQUEST, {});
+      sampleQueueOps.bulkUpsertAndLog(samples);
+
+      setTimeout(() => {
+        expect(winston.error.calledOnce).to.be.true;
+        expect(winston.error.args[0][0]).contains(
+          'sampleQueue flush failed for : 10 samples'
+        );
+        done();
+      }, 1000);
     });
   });
 });

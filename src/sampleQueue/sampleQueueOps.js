@@ -9,9 +9,10 @@
 /**
  * /src/sampleQueue/sampleQueue.js
  */
+const debug = require('debug')('refocus-collector:sampleQueue');
 const logger = require('winston');
 const config = require('../config/config').getConfig();
-const doBulkUpsert = require('./sampleUpsertUtils').doBulkUpsert;
+const sampleUpsertUtils = require('./sampleUpsertUtils');
 const errors = require('../errors/errors');
 const sampleQueue = [];
 
@@ -50,12 +51,12 @@ function bulkUpsertAndLog(samples) {
     );
   }
 
-  doBulkUpsert(config.registry[Object.keys(config.registry)[0]], samples)
+  sampleUpsertUtils.doBulkUpsert(config.registry[Object.keys(config.registry)[0]], samples)
   .then(() => {
     logger.info(`sampleQueue flush successful for : ${samples.length} samples`);
   })
   .catch((err) => {
-    logger.info(
+    logger.error(
       `sampleQueue flush failed for : ${samples.length} samples.` +
       `Error: ${JSON.stringify(err)}`);
   });
@@ -67,8 +68,8 @@ function bulkUpsertAndLog(samples) {
  */
 function flush() {
   let maxSamplesCnt;
-  if (config.hasOwnProperty('maxSamplesPerBulkRequest')) {
-    maxSamplesCnt = config.maxSamplesPerBulkRequest;
+  if (config.collectorConfig.hasOwnProperty('maxSamplesPerBulkRequest')) {
+    maxSamplesCnt = config.collectorConfig.maxSamplesPerBulkRequest;
   }
 
   let samples = sampleQueue;
@@ -79,7 +80,10 @@ function flush() {
     while ((startIdx + maxSamplesCnt) < totSamplesCnt) {
       const endIdx = startIdx + maxSamplesCnt;
       samples = sampleQueue.slice(startIdx, endIdx);
+
       bulkUpsertAndLog(samples);
+
+      // sampleUpsertUtils.doBulkUpsert(config.registry[Object.keys(config.registry)[0]], samples);
       startIdx = endIdx;
     }
 
@@ -87,10 +91,14 @@ function flush() {
   }
 
   bulkUpsertAndLog(samples);
+  sampleQueue.splice(0, samples.length);
+
+  // sampleUpsertUtils.doBulkUpsert(config.registry[Object.keys(config.registry)[0]], samples);
 }
 
 module.exports = {
   enqueue,
   flush,
   sampleQueue, // for testing purposes
+  bulkUpsertAndLog,
 };
