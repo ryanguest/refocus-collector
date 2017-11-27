@@ -85,7 +85,7 @@ function prepareTransformArgs(generator) {
   }
 
   return args;
-}
+} // prepareTransformArgs
 
 /**
  * Handles the response from the remote data source by calling the transform
@@ -106,75 +106,36 @@ function handleCollectResponse(collectResponse) {
   return collectResponse.then((collectRes) => {
     validateCollectResponse(collectRes);
 
-    /*
-     * If the transform is a string, then we use that function for all
-     * status codes.
-     */
     const tr = collectRes.generatorTemplate.transform;
     const args = prepareTransformArgs(collectRes);
-    if (typeof tr === 'string') { // match all status codes
-      const samplesToEnqueue = RefocusCollectorEval.safeTransform(tr, args);
-      logger.info(`{
-        generator: ${collectRes.name},
-        url: ${collectRes.preparedUrl},
-        numSamples: ${samplesToEnqueue.length},
-      }`);
-      queueUtils.enqueueFromArray(bulkUpsertSampleQueue, samplesToEnqueue,
-        commonUtils.validateSample);
+    const status = collectRes.res.statusCode;
+    let samplesToEnqueue;
+
+    // Determine which transform function to use based on the status code.
+    const func = RefocusCollectorEval.getTransformFunction(tr, status);
+    console.log('func', status, typeof status, tr);
+    if (func) {
+      samplesToEnqueue = RefocusCollectorEval.safeTransform(func, args);
+      logger.info({
+        generator: collectRes.name,
+        url: collectRes.preparedUrl,
+        numSamples: samplesToEnqueue.length,
+      });
     } else {
-      /*
-       * The transform is *not* a string, so handle the response based on the
-       * status code.
-       */
-      const status = collectRes.res.statusCode;
-      let func;
-
-      // the response was OK, so use the default transform
-      if (status === httpStatus.OK) {
-        func = collectRes.generatorTemplate.transform.transform;
-      }
-
-      /*
-       * Check for a status code regex match which maps to a transform for
-       * error samples. Use the first one to match. If 200 is matched, it
-       * will override the default transform.
-       */
-      if (tr.errorHandlers) {
-        Object.keys(tr.errorHandlers).forEach((statusMatcher) => {
-          const re = new RegExp(statusMatcher);
-          if (re.test(status)) {
-            func = tr.errorHandlers[statusMatcher];
-          }
-        });
-      }
-
-      if (func) {
-        const samplesToEnqueue = RefocusCollectorEval.safeTransform(func, args);
-        logger.info(`{
-          generator: ${collectRes.name},
-          url: ${collectRes.preparedUrl},
-          numSamples: ${samplesToEnqueue.length},
-        }`);
-        queueUtils.enqueueFromArray(bulkUpsertSampleQueue, samplesToEnqueue,
-          commonUtils.validateSample);
-      } else {
-        /*
-         * If there is no transform designated for this HTTP status code, just
-         * generate default error samples.
-         */
-        const errorMessage = `${collectRes.preparedUrl} returned HTTP status ` +
-          `${collectRes.res.statusCode}: ${collectRes.res.statusMessage}`;
-        const samplesToEnqueue = errorSamples(collectRes, errorMessage);
-        logger.info(`{
-          generator: ${collectRes.name},
-          url: ${collectRes.preparedUrl},
-          error: ${errorMessage},
-          numSamples: ${samplesToEnqueue.length},
-        }`);
-        queueUtils.enqueueFromArray(bulkUpsertSampleQueue, samplesToEnqueue,
-          commonUtils.validateSample);
-      }
+      /* generate default error samples */
+      const errorMessage = `${collectRes.preparedUrl} returned HTTP status ` +
+        `${collectRes.res.statusCode}: ${collectRes.res.statusMessage}`;
+      samplesToEnqueue = errorSamples(collectRes, errorMessage);
+      logger.info({
+        generator: collectRes.name,
+        url: collectRes.preparedUrl,
+        error: errorMessage,
+        numSamples: samplesToEnqueue.length,
+      });
     }
+
+    queueUtils.enqueueFromArray(bulkUpsertSampleQueue, samplesToEnqueue,
+      commonUtils.validateSample);
   })
   .catch((err) => {
     debug(err);

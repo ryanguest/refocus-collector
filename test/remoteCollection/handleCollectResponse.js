@@ -125,7 +125,9 @@ describe('test/remoteCollection/handleCollectResponse.js >', () => {
       context: {},
       res: {},
       generatorTemplate: {
-        transform: 'return [{ name: "Foo" }, { name: "Bar" }]',
+        transform: {
+          default: 'return [{ name: "Foo" }, { name: "Bar" }]',
+        },
       },
     };
     handleCollectResponse(Promise.resolve(obj))
@@ -143,7 +145,9 @@ describe('test/remoteCollection/handleCollectResponse.js >', () => {
       res: {},
       subject: { absolutePath: 'abc' },
       generatorTemplate: {
-        transform: 'return [{ name: "Foo" }, { name: "Bar" }]',
+        transform: {
+          default: 'return [{ name: "Foo" }, { name: "Bar" }]',
+        },
       },
     };
     handleCollectResponse(Promise.resolve(obj))
@@ -161,8 +165,10 @@ describe('test/remoteCollection/handleCollectResponse.js >', () => {
       context: {},
       subject: { absolutePath: 'S1.S2' },
       generatorTemplate: {
-        transform:
-         'return [{ name: "S1.S2|A1", value: 10 }, { name: "S1.S2|A2", value: 2 }]',
+        transform: {
+          default: 'return [{ name: "S1.S2|A1", value: 10 }, ' +
+            '{ name: "S1.S2|A2", value: 2 }]',
+        },
       },
       aspects: [{ name: 'A1', timeout: '1m' }, { name: 'A2', timeout: '1m' }],
     };
@@ -175,18 +181,19 @@ describe('test/remoteCollection/handleCollectResponse.js >', () => {
     .catch(done);
   });
 
-  describe('handleCollectResponse', () => {
+  describe('handleCollectResponse >', () => {
 
     let winstonInfoStub;
     configModule.initializeConfig();
     const config = configModule.getConfig();
     before(() => {
-      queueUtils.createQueue('bulkUpsertSampleQueue',
-        config.refocus.maxSamplesPerBulkRequest,
-        config.refocus.sampleUpsertQueueTime,
-        false,
-        httpUtils.doBulkUpsert
-      );
+      queueUtils.createQueue({
+        name: 'bulkUpsertSampleQueue',
+        size: config.refocus.maxSamplesPerBulkRequest,
+        flushTimeout: config.refocus.sampleUpsertQueueTime,
+        verbose: false,
+        flushFunction: httpUtils.doBulkUpsert,
+      });
 
       // console.log(queueUtils.getQueue('bulkUpsertSampleQueue'));
       // use nock to mock the response when flushing
@@ -228,7 +235,7 @@ describe('test/remoteCollection/handleCollectResponse.js >', () => {
           bulk: true,
         },
         transform: {
-          transform: 'return [{ name: "S1.S2|A1", value: "10" },'
+          default: 'return [{ name: "S1.S2|A1", value: "10" },'
           + ' { name: "S1.S2|A2", value: "2" }]',
           errorHandlers: {
             404: 'return [{ name: "S1.S2|A1", messageBody: "NOT FOUND" },'
@@ -250,7 +257,10 @@ describe('test/remoteCollection/handleCollectResponse.js >', () => {
         { name: 'S1.S2|A1', value: '10' }, { name: 'S1.S2|A2', value: '2' },
       ];
       handleCollectResponse(Promise.resolve(collectRes))
-      .then(() => checkLogs(expected))
+      .then(() => {
+        console.log('here!');
+        checkLogs(expected);
+      })
       .then(done)
       .catch(done);
     });
@@ -351,37 +361,14 @@ describe('test/remoteCollection/handleCollectResponse.js >', () => {
       .catch(done);
     });
 
-    it('transform is a string', (done) => {
-      collectRes.res.statusCode = 200;
-      collectRes.generatorTemplate.transform =
-        'return [{ name: "S1.S2|A1", value: "10" }, { name: "S1.S2|A2", value: "2" }]';
-      const expected = [
-        { name: 'S1.S2|A1', value: '10' }, { name: 'S1.S2|A2', value: '2' },
-      ];
-      handleCollectResponse(Promise.resolve(collectRes))
-      .then(() => checkLogs(expected))
-      .then(done)
-      .catch(done);
-    });
-
-    it('transform is a string, handles all status codes', (done) => {
-      collectRes.res.statusCode = 404;
-      collectRes.generatorTemplate.transform =
-        'return [{ name: "S1.S2|A1", value: "10" }, { name: "S1.S2|A2", value: "2" }]';
-      const expected = [
-        { name: 'S1.S2|A1', value: '10' }, { name: 'S1.S2|A2', value: '2' },
-      ];
-      handleCollectResponse(Promise.resolve(collectRes))
-      .then(() => checkLogs(expected))
-      .then(done)
-      .catch(done);
-    });
-
     function checkLogs(expected) {
       expect(winston.info.calledOnce).to.be.true;
-      expect(winston.info.args[0][0]).contains('generator: mockGenerator');
-      expect(winston.info.args[0][0]).contains(`numSamples: ${expected.length}`);
+      expect(winston.info.args[0][0])
+        .has.property('generator', 'mockGenerator');
+      expect(winston.info.args[0][0])
+        .has.property('numSamples', expected.length);
       const queue = queueUtils.getQueue('bulkUpsertSampleQueue');
+      console.log('queue.items', queue.items);
       expect(queue.items.length).to.be.equal(expected.length);
       expect(queue.items[0]).to.eql(expected[0]);
       expect(queue.items[1]).to.eql(expected[1]);

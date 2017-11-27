@@ -29,13 +29,11 @@ function createQueue(queueParams) {
     flushTimeout: queueParams.flushTimeout,
     verbose: queueParams.verbose,
   });
-
   queueListObject[queueParams.name] = queueObject;
-
   queueObject.on('flush', (data, name) => {
     queueParams.flushFunction(data);
   });
-}
+} // createQueue
 
 /**
  * Get queue based on Name
